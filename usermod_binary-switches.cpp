@@ -54,6 +54,32 @@ public:
         DEBUG_PRINTF(PSTR(": %i switches found\n"), switches);
         return switches;
     }
+    
+    // int to binary representation (string) converter,
+    // length is the number of bits to print (leading zeroes)
+    static std::string printBits(size_t const length, uint const x) {
+        std::string ret;
+        for (int i = length - 1; i >= 0; i--)
+            ret += std::to_string((x >> i) & 1);
+
+        return ret;
+    }
+
+    static std::vector<std::tuple<uint, std::string> > getPresetIdentification() {
+        std::vector<std::tuple<uint, std::string> > ret;
+        if (!requestJSONBufferLock(JSON_LOCK_PRESET_NAME)) return ret;
+        for (uint i = 1; i <= WLED_MAX_PRESETS; i++) {
+            if (readObjectFromFileUsingId(getPresetsFileName(), i, pDoc)) {
+                JsonObject fdo = pDoc->as<JsonObject>();
+                if (fdo["n"]) {
+                    ret.emplace_back(i, fdo["n"]);
+                }
+            }
+        }
+        releaseJSONBufferLock();
+        return ret;
+    }
+
 
     /*
      * addToConfig() saves settings to cfg.json under the "um" object. WLED calls this whenever settings are saved.
@@ -127,21 +153,6 @@ public:
         return configComplete;
     }
 
-    // bool getPresetName(byte index, String& name)
-    //   {
-    //     if (!requestJSONBufferLock(JSON_LOCK_PRESET_NAME)) return false;
-    //     bool presetExists = false;
-    //     if (readObjectFromFileUsingId(getPresetsFileName(), index, pDoc)) {
-    //       JsonObject fdo = pDoc->as<JsonObject>();
-    //       if (fdo["n"]) {
-    //         name = (const char*)(fdo["n"]);
-    //         presetExists = true;
-    //       }
-    //     }
-    //     releaseJSONBufferLock();
-    //     return presetExists;
-    //   }
-
     /*
      * appendConfigData() is called when the Usermod Settings page renders.
      * Write JavaScript snippets to settingsScript to add helper text or dropdowns for your config fields.
@@ -159,13 +170,11 @@ public:
 
         auto get_preset_options = []() -> std::string {
             std::string ret = "addOption(dd,'0: Default Nothingness',0);";
-            for (int i = 1; i <= WLED_MAX_PRESETS; i++) {
-                String name;
-                if (getPresetName(i, name)) {
-                    ret += "addOption(dd,'";
-                    ret += std::to_string(i) + ": " + name.c_str();
-                    ret += "'," + std::to_string(i) + ");";
-                }
+            std::vector<std::tuple<uint, std::string> > presets = getPresetIdentification();
+            for (const std::tuple<uint, std::string> &preset: presets) {
+                ret += "addOption(dd,'" +
+                        std::to_string(std::get<0>(preset)) + ": " + std::get<1>(preset) +
+                        "'," + std::to_string(std::get<0>(preset)) + ");";
             }
             return ret;
         };
