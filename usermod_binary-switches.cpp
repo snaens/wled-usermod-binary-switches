@@ -114,7 +114,7 @@ public:
         // top["testInt"] = testInt;
 
         JsonObject switches = top.createNestedObject("switches");
-        JsonArray activeSwitches = top.createNestedArray(F("active switches"));
+        JsonArray activeSwitches = switches.createNestedArray(F("active switches"));
         int i = 0;
         for (const Button &button: buttons) {
             if (button.type == BTN_TYPE_SWITCH || button.type == BTN_TYPE_TOUCH_SWITCH)
@@ -124,7 +124,7 @@ public:
 
         JsonObject presets = top.createNestedObject("presets");
         // cannot be called "mapping" - since that contains the word "pin" and therefore gets treated as pin datatype
-        JsonArray presetMap = top.createNestedArray(F("preset map"));
+        JsonArray presetMap = presets.createNestedArray(F("preset map"));
         for (int i = 0; i < n_combinations; i++)
             // upon save if new switches are added we get an out of range problem
             // so we zero out the new combinations' mappings
@@ -237,40 +237,39 @@ public:
         for (int i = 0; i < n_combinations; i++) {
             SPRNT(F("addInfo('"));
             SPRNT(FPSTR(_name));
-            SPRNT(F(":preset map[]',"));
+            SPRNT(F(":presets:preset map[]',"));
             SPRNT(i);
             SPRNT(F(",'<i>(state: "));
             SPRNT(printBits(n_switches, i).c_str());
             SPRNT(F(")</i>');"));
 
-            // SPRNT(F("dd=addDropdown('"));
-            // SPRNT(FPSTR(_name));
-            // SPRNT(F(":preset map[]',"));
-            // SPRNT(i);
-            // SPRNT(F(");"));
-            // // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
-            // SPRNT(preset_options.c_str());
+            SPRNT(F("dd=addDropdown('"));
+            SPRNT(FPSTR(_name));
+            SPRNT(F("','presets:preset map[]',"));
+            SPRNT(i);
+            SPRNT(F(");"));
+            // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
+            SPRNT(preset_options.c_str());
         }
 
         for (int i = 0; i < n_switches; i++) {
             SPRNT(F("addInfo('"));
             SPRNT(FPSTR(_name));
-            SPRNT(F(":active switches[]',"));
+            SPRNT(F(":switches:active switches[]',"));
             SPRNT(i);
             SPRNT(F(",'<i>(switch: "));
-            SPRNT(F("aaa"));
             // print switch position sw. 1 -> `ooX`
-            // for (int j = 0; j < n_switches; j++)
-            //     SPRNT(j == i ? "X" : "o");
+            for (int j = 0; j < n_switches; j++)
+                SPRNT(j == i ? "X" : "o");
             SPRNT(F(")</i>');"));
 
-            // SPRNT(F("dd=addDropdown('"));
-            // SPRNT(FPSTR(_name));
-            // SPRNT(F(":active switches[]',"));
-            // SPRNT(i);
-            // SPRNT(F(");"));
-            // // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
-            // SPRNT(switch_options.c_str());
+            SPRNT(F("dd=addDropdown('"));
+            SPRNT(FPSTR(_name));
+            SPRNT(F("','switches:active switches[]',"));
+            SPRNT(i);
+            SPRNT(F(");"));
+            // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
+            SPRNT(switch_options.c_str());
         }
     }
 
