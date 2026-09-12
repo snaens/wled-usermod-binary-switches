@@ -8,10 +8,13 @@ private:
     // Private class members. You can declare variables and functions only accessible to your usermod here
     bool enabled = false;
     uint binary_state = 0;
+    uint n_switches = 0;
+    uint n_combinations = 0;
 
     // config variables — defaults set inside readFromConfig()
 
     std::vector<uint> preset_map;
+    std::map<uint, uint> switch_map; // button# -> index
 
     // string that are used multiple time (this will save some flash memory)
     static const char _name[];
@@ -44,6 +47,7 @@ public:
     void loop() override {
     }
 
+    // get number of switch type buttons
     static uint num_switches() {
         uint switches = 0;
         for (const Button &button: buttons) {
@@ -54,7 +58,7 @@ public:
         DEBUG_PRINTF(PSTR(": %i switches found\n"), switches);
         return switches;
     }
-    
+
     // int to binary representation (string) converter,
     // length is the number of bits to print (leading zeroes)
     static std::string printBits(size_t const length, uint const x) {
@@ -79,7 +83,6 @@ public:
         releaseJSONBufferLock();
         return ret;
     }
-
 
     /*
      * addToConfig() saves settings to cfg.json under the "um" object. WLED calls this whenever settings are saved.
@@ -106,12 +109,23 @@ public:
      */
     void addToConfig(JsonObject &root) override {
         JsonObject top = root.createNestedObject(FPSTR(_name));
+
         top[FPSTR(_enabled)] = enabled;
         // top["testInt"] = testInt;
-        // cannot be called "mapping" - since that contains the word "pin" and therefore gets treated as pin datatzpe
-        JsonArray presetMap = top.createNestedArray("preset map");
-        uint n_combinations = pow(2, num_switches());
-        for (int i = 0; i < n_combinations && n_combinations > 1; i++)
+
+        JsonObject switches = top.createNestedObject("switches");
+        JsonArray activeSwitches = top.createNestedArray(F("active switches"));
+        int i = 0;
+        for (const Button &button: buttons) {
+            if (button.type == BTN_TYPE_SWITCH || button.type == BTN_TYPE_TOUCH_SWITCH)
+                activeSwitches.add(i);
+            i++;
+        }
+
+        JsonObject presets = top.createNestedObject("presets");
+        // cannot be called "mapping" - since that contains the word "pin" and therefore gets treated as pin datatype
+        JsonArray presetMap = top.createNestedArray(F("preset map"));
+        for (int i = 0; i < n_combinations; i++)
             // upon save if new switches are added we get an out of range problem
             // so we zero out the new combinations' mappings
             presetMap.add(i < preset_map.size() ? preset_map.at(i) : 0);
@@ -125,6 +139,11 @@ public:
      * getJsonValue(src, dest, default) also assigns a default when the key is absent.
      */
     bool readFromConfig(JsonObject &root) override {
+        // config was saved -> no. of switches may have changed
+        // or we just booted and need to init these
+        n_switches = num_switches();
+        n_combinations = n_switches == 1 ? 0 : pow(2, n_switches); // 2^0 = 1, however 0 switches realistically means no combinations
+
         JsonObject top = root[FPSTR(_name)];
         if (top.isNull()) {
             DEBUG_PRINT(FPSTR(_name));
@@ -141,14 +160,38 @@ public:
 
         // "pin" fields have special handling in settings page (or some_pin as well)
 
-        // cache output (so it only gets called once)
-        uint n_combinations = pow(2, num_switches());
+        switch_map.clear();
+
+        DEBUG_PRINT(FPSTR(_name));
+        DEBUG_PRINTF(PSTR(": loading config using %i switches\n"), n_switches);
+        for (int i = 0; i < n_switches; ++i) {
+            if (buttons[i].type == BTN_TYPE_SWITCH || buttons[i].type == BTN_TYPE_TOUCH_SWITCH) {
+                int button_id;
+                configComplete &= getJsonValue(top[F("active switches")][i], button_id, 0);
+                if (button_id >= 0) {
+                    // negative = disabled
+                    switch_map[i] = button_id;
+                    DEBUG_PRINT(FPSTR(_name));
+                    DEBUG_PRINTF(PSTR(": configured switch mapping %i -> %i\n"), i, switch_map[i]);
+                } else if (button_id == -1) {
+                    DEBUG_PRINT(FPSTR(_name));
+                    DEBUG_PRINTF(PSTR(": button %i is disabled\n"), i);
+                }
+            }
+        }
+
+
         preset_map.clear();
-        preset_map.insert(preset_map.end(), n_combinations, 0);
+        for (int i = 0; i < n_combinations; ++i)
+            preset_map.push_back(0);
+
         DEBUG_PRINT(FPSTR(_name));
         DEBUG_PRINTF(PSTR(": loading config using %i combinations\n"), n_combinations);
-        for (int i = 0; i < n_combinations && n_combinations > 1; i++)
-            configComplete &= getJsonValue(top["preset map"][i], preset_map.at(i), 0);
+        for (int i = 0; i < n_combinations; i++) {
+            configComplete &= getJsonValue(top[F("preset map")][i], preset_map.at(i), 0);
+            DEBUG_PRINT(FPSTR(_name));
+            DEBUG_PRINTF(PSTR(": configured combination mapping %i -> %i\n"), i, preset_map.at(i));
+        }
 
         return configComplete;
     }
@@ -160,14 +203,6 @@ public:
      * addDropdown / addOption replace a plain text input with a <select>.
      */
     void appendConfigData(Print &settingsScript) override {
-        auto printBits = [](size_t const size, uint const n) -> std::string {
-            std::string ret;
-            for (int i = size - 1; i >= 0; i--)
-                ret += std::to_string((n >> i) & 1);
-
-            return ret;
-        };
-
         auto get_preset_options = []() -> std::string {
             std::string ret = "addOption(dd,'0: Default Nothingness',0);";
             std::vector<std::tuple<uint, std::string> > presets = getPresetIdentification();
@@ -178,26 +213,64 @@ public:
             }
             return ret;
         };
-        // cache output
+
+        auto get_switch_options = []() -> std::string {
+            std::string ret = "addOption(dd,'Disabled',-1);";
+            int i = 0;
+            for (const Button &button: buttons) {
+                if (button.type == BTN_TYPE_SWITCH || button.type == BTN_TYPE_TOUCH_SWITCH) {
+                    ret += "addOption(dd,'Switch " +
+                            std::to_string(i) + " (pin " + std::to_string(button.pin) +
+                            ")'," + std::to_string(i) + ");";
+                    i++;
+                }
+            }
+            return ret;
+        };
+
+        // cache outputs
         auto preset_options = get_preset_options();
+        auto switch_options = get_switch_options();
 
-        uint n_combinations = pow(2, num_switches());
-        for (int i = 0; i < n_combinations && n_combinations > 1; i++) {
-            settingsScript.print(F("addInfo('"));
-            settingsScript.print(FPSTR(_name));
-            settingsScript.print(F(":preset map[]',"));
-            settingsScript.print(i);
-            settingsScript.print(F(",'<i>(state: "));
-            settingsScript.print(printBits(num_switches(), i).c_str());
-            settingsScript.print(F(")</i>');"));
+#define SPRNT(STR) settingsScript.print(STR)
 
-            settingsScript.print(F("dd=addDropdown('"));
-            settingsScript.print(FPSTR(_name));
-            settingsScript.print(F(":preset map[]',"));
-            settingsScript.print(i);
-            settingsScript.print(F(");"));
-            // settingsScript.print(F("addOption(dd,'TEXT HERE',0);"));
-            settingsScript.print(preset_options.c_str());
+        for (int i = 0; i < n_combinations; i++) {
+            SPRNT(F("addInfo('"));
+            SPRNT(FPSTR(_name));
+            SPRNT(F(":preset map[]',"));
+            SPRNT(i);
+            SPRNT(F(",'<i>(state: "));
+            SPRNT(printBits(n_switches, i).c_str());
+            SPRNT(F(")</i>');"));
+
+            // SPRNT(F("dd=addDropdown('"));
+            // SPRNT(FPSTR(_name));
+            // SPRNT(F(":preset map[]',"));
+            // SPRNT(i);
+            // SPRNT(F(");"));
+            // // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
+            // SPRNT(preset_options.c_str());
+        }
+
+        for (int i = 0; i < n_switches; i++) {
+            SPRNT(F("addInfo('"));
+            SPRNT(FPSTR(_name));
+            SPRNT(F(":active switches[]',"));
+            SPRNT(i);
+            SPRNT(F(",'<i>(switch: "));
+            SPRNT(F("aaa"));
+            // print switch position sw. 1 -> `ooX`
+            // for (int j = 0; j < n_switches; j++)
+            //     SPRNT(j == i ? "X" : "o");
+            SPRNT(F(")</i>');"));
+
+            // SPRNT(F("dd=addDropdown('"));
+            // SPRNT(FPSTR(_name));
+            // SPRNT(F(":active switches[]',"));
+            // SPRNT(i);
+            // SPRNT(F(");"));
+            // // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
+            // SPRNT(switch_options.c_str());
         }
     }
 
@@ -227,14 +300,24 @@ public:
                 //fire edge event only after 50ms without change (debounce)
                 DEBUG_PRINTF_P(PSTR("Switch: Activating  %u\n"), b);
 
-                binary_state ^= 1 << b;
+                if (switch_map.count(b) == 0) {
+                    DEBUG_PRINT(FPSTR(_name));
+                    DEBUG_PRINTF_P(PSTR("Button %u, pin %i is disabled! Ignoring toggle\n"), b, buttons[b].pin);
+                } else {
+                    DEBUG_PRINT(FPSTR(_name));
+                    DEBUG_PRINTF_P(PSTR("Button %u, pin %i -> state: %i\n"), b, buttons[b].pin, buttons[b].pressedBefore);
 
-                DEBUG_PRINTF_P(PSTR("Button %u, pin %i -> state: %i\n"), b, buttons[b].pin, buttons[b].pressedBefore);
-                DEBUG_PRINT(FPSTR(_name));
-                DEBUG_PRINTF_P(PSTR(": Switch pattern: %i\n"), binary_state);
+                    binary_state ^= 1 << switch_map.at(b);
+                    DEBUG_PRINT(FPSTR(_name));
+                    DEBUG_PRINTF_P(PSTR(": Switch pattern: %s\n"), printBits(n_switches, binary_state).c_str());
 
-                applyPreset(preset_map.at(binary_state), CALL_MODE_BUTTON_PRESET);
+                    for (auto preset: preset_map) {
+                        DEBUG_PRINT("preset map ");
+                        DEBUG_PRINTLN(preset);
+                    }
 
+                    applyPreset(preset_map.at(binary_state), CALL_MODE_BUTTON_PRESET);
+                }
                 buttons[b].longPressed = buttons[b].pressedBefore; //save the last "long term" switch state
             }
             return true;
