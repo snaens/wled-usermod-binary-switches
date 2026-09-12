@@ -1,55 +1,23 @@
 #include "wled.h"
 
-/*
- * Usermods allow you to add own functionality to WLED without touching core source files.
- * See the WLED docs: https://kno.wled.ge/advanced/custom-features/
- *
- * This is an example usermod. It demonstrates:
- *   - persistent settings via addToConfig() / readFromConfig()
- *   - JSON state read/write via addToJsonState() / readFromJsonState()
- *   - MQTT subscribe and message handling (guarded by WLED_DISABLE_MQTT)
- *   - button event handling
- *   - the Usermod Settings page via appendConfigData()
- *
- * To create your own usermod:
- *   1. Click "Use this template" on https://github.com/wled/wled-usermod-example to create your own repo.
- *   2. Rename the class and file to something descriptive.
- *   3. Reference your new repo in platformio_override.ini via custom_usermods.
- *
- * REGISTER_USERMOD() at the bottom self-registers the instance — no other
- * file edits are needed.
- */
+#define WLED_DEBOUNCE_THRESHOLD      50 // only consider button input of at least 50ms as valid (debouncing)
+#define WLED_MAX_PRESETS            250 // max. no. of presets (iteration ceiling for preset discovery)
 
-//class name. Use something descriptive and leave the ": public Usermod" part :)
 class UsermodBinarySwitches : public Usermod {
 
   private:
 
     // Private class members. You can declare variables and functions only accessible to your usermod here
     bool enabled = false;
-    bool initDone = false;
-    unsigned long lastTime = 0;
+    uint binary_state = 0;
 
-    // config variables — boot defaults can be set here or inside readFromConfig()
-    bool testBool = false;
-    unsigned long testULong = 42424242;
-    float testFloat = 42.42;
-    String testString = "Forty-Two";
-    uint16_t greatValue = 0;  // example persistent value exposed in JSON state
+    // config variables — defaults set inside readFromConfig()
 
-    // These config variables have defaults set inside readFromConfig()
-    int testInt;
-    long testLong;
-    int8_t testPins[2];
+    std::vector<uint> preset_map;
 
     // string that are used multiple time (this will save some flash memory)
     static const char _name[];
     static const char _enabled[];
-
-
-    // any private methods should go here (non-inline method should be defined out of class)
-    void publishMqtt(const char* state, bool retain = false); // example for publishing MQTT message
-
 
   public:
 
@@ -65,112 +33,28 @@ class UsermodBinarySwitches : public Usermod {
      */
     inline bool isEnabled() { return enabled; }
 
-    // To access this usermod from another usermod, cast the result of UsermodManager::lookup():
-    //   UsermodBinarySwitches* um = (UsermodBinarySwitches*) UsermodManager::lookup(USERMOD_ID_MYUSERMOD);
-    // Make sure to assign a unique ID in getId()!
-
-
     /*
      * setup() is called once at boot. WiFi is not yet connected at this point.
      * readFromConfig() is called prior to setup()
      * You can use it to initialize variables, sensors or similar.
      */
-    void setup() override {
-      // do your set-up here
-      //Serial.println("Hello from my usermod!");
-      initDone = true;
-    }
-
-
-    /*
-     * connected() is called every time the WiFi is (re)connected
-     * Use it to initialize network interfaces
-     */
-    void connected() override {
-      //Serial.println("Connected to WiFi!");
-    }
-
+    void setup() override {}
 
     /*
      * loop() is called continuously. Here you can check for events, read sensors, etc.
-     * 
-     * Tips:
-     * 1. You can use "if (WLED_CONNECTED)" to check for a successful network connection.
-     *    Additionally, "if (WLED_MQTT_CONNECTED)" is available to check for a connection to an MQTT broker.
-     * 
-     * 2. Try to avoid using the delay() function. NEVER use delays longer than 10 milliseconds.
-     *    Instead, use a timer check as shown here.
      */
-    void loop() override {
-      // if usermod is disabled or called during strip updating just exit
-      // NOTE: on very long strips strip.isUpdating() may always return true so update accordingly
-      if (!enabled || strip.isUpdating()) return;
+    void loop() override {}
 
-      // do your magic here
-      if (millis() - lastTime > 1000) {
-        //Serial.println("I'm alive!");
-        lastTime = millis();
+    static uint num_switches() {
+      uint switches = 0;
+      for (const Button &button : buttons) {
+        if (button.type == BTN_TYPE_SWITCH || button.type == BTN_TYPE_TOUCH_SWITCH)
+          switches++;
       }
+      DEBUG_PRINT(FPSTR(_name));
+      DEBUG_PRINTF(PSTR(": %i switches found\n"), switches);
+      return switches;
     }
-
-
-    /*
-     * addToJsonInfo() can be used to add custom entries to the /json/info part of the JSON API.
-     * Creating an "u" object allows you to add custom key/value pairs to the Info section of the WLED web UI.
-     * Below it is shown how this could be used for e.g. a light sensor
-     */
-    void addToJsonInfo(JsonObject& root) override
-    {
-      // if "u" object does not exist yet wee need to create it
-      JsonObject user = root["u"];
-      if (user.isNull()) user = root.createNestedObject("u");
-
-      //this code adds "u":{"ExampleUsermod":[20," lux"]} to the info object
-      //int reading = 20;
-      //JsonArray lightArr = user.createNestedArray(FPSTR(_name))); //name
-      //lightArr.add(reading); //value
-      //lightArr.add(F(" lux")); //unit
-
-      // if you are implementing a sensor usermod, you may publish sensor data
-      //JsonObject sensor = root[F("sensor")];
-      //if (sensor.isNull()) sensor = root.createNestedObject(F("sensor"));
-      //temp = sensor.createNestedArray(F("light"));
-      //temp.add(reading);
-      //temp.add(F("lux"));
-    }
-
-
-    /*
-     * addToJsonState() adds entries to the /json/state response. Clients can read and write these.
-     * Use this to expose runtime state that should be controllable via the API.
-     * addToJsonState() is NOT called for presets — use addToConfig() for persistent values.
-     */
-    void addToJsonState(JsonObject& root) override
-    {
-      if (!initDone || !enabled) return;  // prevent crash on boot applyPreset()
-
-      JsonObject usermod = root[FPSTR(_name)];
-      if (usermod.isNull()) usermod = root.createNestedObject(FPSTR(_name));
-
-      usermod["greatValue"] = greatValue;
-    }
-
-
-    /*
-     * readFromJsonState() receives values a client POSTs to /json/state.
-     * The JSON key nesting matches what addToJsonState() writes — clients send back the same structure.
-     */
-    void readFromJsonState(JsonObject& root) override
-    {
-      if (!initDone) return;  // prevent crash on boot applyPreset()
-
-      JsonObject usermod = root[FPSTR(_name)];
-      if (!usermod.isNull()) {
-        // getJsonValue copies the value if present and returns true; leaves the variable unchanged if missing
-        getJsonValue(usermod["greatValue"], greatValue);
-      }
-    }
-
 
     /*
      * addToConfig() saves settings to cfg.json under the "um" object. WLED calls this whenever settings are saved.
@@ -199,16 +83,14 @@ class UsermodBinarySwitches : public Usermod {
     {
       JsonObject top = root.createNestedObject(FPSTR(_name));
       top[FPSTR(_enabled)] = enabled;
-      top["great"] = greatValue;
-      top["testBool"] = testBool;
-      top["testInt"] = testInt;
-      top["testLong"] = testLong;
-      top["testULong"] = testULong;
-      top["testFloat"] = testFloat;
-      top["testString"] = testString;
-      JsonArray pinArray = top.createNestedArray("pin");
-      pinArray.add(testPins[0]);
-      pinArray.add(testPins[1]); 
+      // top["testInt"] = testInt;
+      // cannot be called "mapping" - since that contains the word "pin" and therefore gets treated as pin datatzpe
+      JsonArray presetMap = top.createNestedArray("preset map");
+      uint n_combinations = pow(2, num_switches());
+      for (int i = 0; i < n_combinations && n_combinations > 1; i++)
+          // upon save if new switches are added we get an out of range problem
+          // so we zero out the new combinations' mappings
+          presetMap.add(i < preset_map.size() ? preset_map.at(i) : 0 );
     }
 
 
@@ -221,26 +103,47 @@ class UsermodBinarySwitches : public Usermod {
     bool readFromConfig(JsonObject& root) override
     {
       JsonObject top = root[FPSTR(_name)];
+      if (top.isNull()) {
+        DEBUG_PRINT(FPSTR(_name));
+        DEBUG_PRINTLN(F(": No config found. (Using defaults.)"));
+      }
 
       bool configComplete = !top.isNull();
 
-      configComplete &= getJsonValue(top["great"], greatValue);
-      configComplete &= getJsonValue(top["testBool"], testBool);
-      configComplete &= getJsonValue(top["testULong"], testULong);
-      configComplete &= getJsonValue(top["testFloat"], testFloat);
-      configComplete &= getJsonValue(top["testString"], testString);
+      configComplete &= getJsonValue(top[FPSTR(_enabled)], enabled, enabled);
 
-      // A 3-argument getJsonValue() assigns the 3rd argument as a default value if the Json value is missing
-      configComplete &= getJsonValue(top["testInt"], testInt, 42);  
-      configComplete &= getJsonValue(top["testLong"], testLong, -42424242);
+      // A 3-argument getJsonValue() assigns the 3rd argument as a default value
+      // if the Json value is missing
+      // configComplete &= getJsonValue(top["testInt"], testInt, 42);
 
       // "pin" fields have special handling in settings page (or some_pin as well)
-      configComplete &= getJsonValue(top["pin"][0], testPins[0], -1);
-      configComplete &= getJsonValue(top["pin"][1], testPins[1], -1);
+
+       // cache output (so it only gets called once)
+      uint n_combinations = pow(2, num_switches());
+      preset_map.clear();
+      preset_map.insert(preset_map.end(), n_combinations, 0);
+      DEBUG_PRINT(FPSTR(_name));
+      DEBUG_PRINTF(PSTR(": loading config using %i combinations\n"), n_combinations);
+      for (int i = 0; i < n_combinations && n_combinations > 1; i++)
+        configComplete &= getJsonValue(top["preset map"][i], preset_map.at(i) , 0);
 
       return configComplete;
     }
 
+  // bool getPresetName(byte index, String& name)
+  //   {
+  //     if (!requestJSONBufferLock(JSON_LOCK_PRESET_NAME)) return false;
+  //     bool presetExists = false;
+  //     if (readObjectFromFileUsingId(getPresetsFileName(), index, pDoc)) {
+  //       JsonObject fdo = pDoc->as<JsonObject>();
+  //       if (fdo["n"]) {
+  //         name = (const char*)(fdo["n"]);
+  //         presetExists = true;
+  //       }
+  //     }
+  //     releaseJSONBufferLock();
+  //     return presetExists;
+  //   }
 
     /*
      * appendConfigData() is called when the Usermod Settings page renders.
@@ -250,24 +153,41 @@ class UsermodBinarySwitches : public Usermod {
      */
     void appendConfigData(Print& settingsScript) override
     {
-      settingsScript.print(F("addInfo('")); settingsScript.print(FPSTR(_name)); settingsScript.print(F(":great',1,'<i>(this is a great config value)</i>');"));
-      settingsScript.print(F("addInfo('")); settingsScript.print(FPSTR(_name)); settingsScript.print(F(":testString',1,'enter any string you want');"));
-      settingsScript.print(F("dd=addDropdown('")); settingsScript.print(FPSTR(_name)); settingsScript.print(F("','testInt');"));
-      settingsScript.print(F("addOption(dd,'Nothing',0);"));
-      settingsScript.print(F("addOption(dd,'Everything',42);"));
+      auto printBits = [](size_t const size, uint const n) -> std::string {
+        std::string ret;
+        for (int i = size-1; i >= 0; i--)
+            ret += std::to_string( (n >> i) & 1);
+
+        return ret;
+      };
+
+      auto get_preset_options = []() -> std::string {
+        std::string ret = "addOption(dd,'0: Default Nothingness',0);";
+        for (int i = 1; i <= WLED_MAX_PRESETS; i++) {
+          String name;
+          if (getPresetName(i, name)) {
+            ret += "addOption(dd,'";
+            ret += std::to_string(i) + ": " + name.c_str();
+            ret += "'," + std::to_string(i) + ");";
+          }
+        }
+        return ret;
+      };
+      // cache output
+      auto preset_options = get_preset_options();
+
+      uint n_combinations = pow(2, num_switches());
+      for (int i = 0; i < n_combinations && n_combinations > 1; i++) {
+        settingsScript.print(F("addInfo('")); settingsScript.print(FPSTR(_name));
+        settingsScript.print(F(":preset map[]',")); settingsScript.print(i);
+        settingsScript.print(F(",'<i>(state: ")); settingsScript.print(printBits(num_switches() ,i).c_str());
+        settingsScript.print(F(")</i>');"));
+
+        settingsScript.print(F("dd=addDropdown('")); settingsScript.print(FPSTR(_name)); settingsScript.print(F(":preset map[]',")); settingsScript.print(i); settingsScript.print(F(");"));
+        // settingsScript.print(F("addOption(dd,'TEXT HERE',0);"));
+        settingsScript.print(preset_options.c_str());
+      }
     }
-
-
-    /*
-     * handleOverlayDraw() is called just before every show() (LED strip update frame) after effects have set the colors.
-     * Use this to blank out some LEDs or set them to a different color regardless of the set effect mode.
-     * Commonly used for custom clocks (Cronixie, 7 segment)
-     */
-    void handleOverlayDraw() override
-    {
-      //strip.setPixelColor(0, RGBW32(0,0,0,0)) // set the first pixel to black
-    }
-
 
     /**
      * handleButton() can be used to override default button behaviour. Returning true
@@ -277,73 +197,39 @@ class UsermodBinarySwitches : public Usermod {
     bool handleButton(uint8_t b) override {
       yield();
       // ignore certain button types as they may have other consequences
-      if (!enabled
-       || buttons[b].type == BTN_TYPE_NONE
-       || buttons[b].type == BTN_TYPE_RESERVED
-       || buttons[b].type == BTN_TYPE_PIR_SENSOR
-       || buttons[b].type == BTN_TYPE_ANALOG
-       || buttons[b].type == BTN_TYPE_ANALOG_INVERTED) {
+      if (!enabled)
         return false;
-      }
 
-      bool handled = false;
       // do your button handling here
-      return handled;
-    }
-  
+      if (buttons[b].type == BTN_TYPE_SWITCH || buttons[b].type == BTN_TYPE_TOUCH_SWITCH || buttons[b].type == BTN_TYPE_PIR_SENSOR) {
+        // isButtonPressed() handles inverted/noninverted logic
+        if (buttons[b].pressedBefore != isButtonPressed(b)) {
+          DEBUG_PRINTF_P(PSTR("Switch: State changed %u\n"), b);
+          buttons[b].pressedTime = millis();
+          buttons[b].pressedBefore = !buttons[b].pressedBefore; // toggle pressed state
+        }
 
-#ifndef WLED_DISABLE_MQTT
-    /**
-     * onMqttMessage() is called when a subscribed MQTT topic receives a message.
-     * topic only contains stripped topic (part after /wled/MAC).
-     * Return true to mark the message handled (prevents other usermods from seeing it).
-     * These methods must be inside a #ifndef WLED_DISABLE_MQTT guard — MQTT support is a compile-time option.
-     * See usermods/multi_relay for a well-structured subscribe-in-connect / handle-in-message example.
-     */
-    bool onMqttMessage(char* topic, char* payload) override {
-      //if (strlen(topic) == 8 && strncmp_P(topic, PSTR("/command"), 8) == 0) {
-      //  String action = payload;
-      //  if (action == "on")     { enabled = true;  return true; }
-      //  if (action == "off")    { enabled = false; return true; }
-      //  if (action == "toggle") { enabled = !enabled; return true; }
-      //}
+        if (buttons[b].longPressed == buttons[b].pressedBefore) return true;
+
+        if (millis() - buttons[b].pressedTime > WLED_DEBOUNCE_THRESHOLD) {
+          //fire edge event only after 50ms without change (debounce)
+          DEBUG_PRINTF_P(PSTR("Switch: Activating  %u\n"), b);
+
+          binary_state ^= 1 << b;
+
+          DEBUG_PRINTF_P(PSTR("Button %u, pin %i -> state: %i\n"), b, buttons[b].pin, buttons[b].pressedBefore);
+          DEBUG_PRINT(FPSTR(_name));
+          DEBUG_PRINTF_P(PSTR(": Switch pattern: %i\n"), binary_state);
+
+          applyPreset(preset_map.at(binary_state), CALL_MODE_BUTTON_PRESET);
+
+          buttons[b].longPressed = buttons[b].pressedBefore; //save the last "long term" switch state
+        }
+          return true;
+        }
       return false;
     }
 
-    /**
-     * onMqttConnect() is called when MQTT connection is established.
-     * Subscribe to topics here; mqttDeviceTopic holds the device-specific prefix.
-     */
-    void onMqttConnect(bool sessionPresent) override {
-      //char subuf[64];
-      //if (mqttDeviceTopic[0] != 0) {
-      //  strcpy(subuf, mqttDeviceTopic);
-      //  strcat_P(subuf, PSTR("/command"));
-      //  mqtt->subscribe(subuf, 0);
-      //}
-    }
-#endif
-
-
-    /**
-     * onStateChanged() is used to detect WLED state change
-     * @mode parameter is CALL_MODE_... parameter used for notifications
-     */
-    void onStateChange(uint8_t mode) override {
-      // do something if WLED state changed (color, brightness, effect, preset, etc)
-    }
-
-
-    /*
-     * getId() allows you to optionally give your usermod a unique ID.
-     * The base class returns USERMOD_ID_UNSPECIFIED, which is correct for most custom usermods.
-     * Override only if you need reliable cross-usermod lookup via UsermodManager::lookup()
-     * and have multiple usermods with the same ID registered simultaneously.
-     */
-    // uint16_t getId() override { return USERMOD_ID_UNSPECIFIED; }
-
-   //More methods can be added in the future, this example will then be extended.
-   //Your usermod will remain compatible as it does not need to implement all methods from the Usermod base class!
 };
 
 
@@ -351,21 +237,6 @@ class UsermodBinarySwitches : public Usermod {
 const char UsermodBinarySwitches::_name[]    PROGMEM = "BinarySwitches";
 const char UsermodBinarySwitches::_enabled[] PROGMEM = "enabled";
 
-
-// implementation of non-inline member methods
-
-void UsermodBinarySwitches::publishMqtt(const char* state, bool retain)
-{
-#ifndef WLED_DISABLE_MQTT
-  //Check if MQTT Connected, otherwise it will crash the 8266
-  if (WLED_MQTT_CONNECTED) {
-    char subuf[64];
-    strcpy(subuf, mqttDeviceTopic);
-    strcat_P(subuf, PSTR("/example"));
-    mqtt->publish(subuf, 0, retain, state);
-  }
-#endif
-}
 
 static UsermodBinarySwitches binary_switches_usermod;
 REGISTER_USERMOD(binary_switches_usermod);
