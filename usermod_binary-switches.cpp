@@ -61,11 +61,10 @@ public:
 
     // int to binary representation (string) converter,
     // length is the number of bits to print (leading zeroes)
-    static std::string printBits(size_t const length, uint const x) {
+    static std::string printBits(size_t const length, uint const x, std::tuple<std::string, std::string> chars = {"0", "1"}) {
         std::string ret;
         for (int i = length - 1; i >= 0; i--)
-            ret += std::to_string((x >> i) & 1);
-
+            ret += (x >> i) & 1 ? std::get<1>(chars) : std::get<0>(chars);
         return ret;
     }
 
@@ -115,11 +114,8 @@ public:
 
         JsonObject switches = top.createNestedObject("switches");
         JsonArray activeSwitches = switches.createNestedArray(F("active switches"));
-        int i = 0;
-        for (const Button &button: buttons) {
-            if (button.type == BTN_TYPE_SWITCH || button.type == BTN_TYPE_TOUCH_SWITCH)
-                activeSwitches.add(i);
-            i++;
+        for (const auto sw: switch_map) {
+            activeSwitches.add(sw);
         }
 
         JsonObject presets = top.createNestedObject("presets");
@@ -166,16 +162,18 @@ public:
         DEBUG_PRINTF(PSTR(": loading config using %i switches\n"), n_switches);
         JsonArray config;
         configComplete &= getJsonValue(top[F("switches")][F("active switches")], config);
+        int i = 0;
         for (int switchid: config) {
             if (switchid >= 0) {
                 // negative = disabled
                 switch_map.push_back(switchid);
                 DEBUG_PRINT(FPSTR(_name));
-                DEBUG_PRINTF(PSTR(": configured switch mapping %i -> %i\n"), switchid, switch_map[switchid]);
+                DEBUG_PRINTF(PSTR(": configured switch mapping %i -> %i\n"), i, switchid);
             } else if (switchid == -1) {
                 DEBUG_PRINT(FPSTR(_name));
                 DEBUG_PRINTF(PSTR(": button %i is disabled\n"), switchid);
             }
+            i++;
         }
 
         preset_map.clear();
@@ -268,6 +266,12 @@ public:
             // SPRNT(F("addOption(dd,'TEXT HERE',0);"));
             SPRNT(switch_options.c_str());
         }
+
+        SPRNT(F("addInfo('"));
+        SPRNT(FPSTR(_name));
+        SPRNT(F(":enabled',0,'<p><b>state upon loading page:</b> "));
+        SPRNT(printBits(n_switches, binary_state,{ "⚫", "🟢"}).c_str());
+        SPRNT(F("</p>');"));
     }
 
     /**
