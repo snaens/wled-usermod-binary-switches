@@ -107,6 +107,10 @@ public:
      * possible LED stutter). Never call it from a network callback.
      */
     void addToConfig(JsonObject &root) override {
+        // settings config just saved -> no. of switches may have changed
+        n_switches = num_switches();
+        n_combinations = n_switches == 1 ? 0 : pow(2, n_switches); // 2^0 = 1, however 0 switches realistically means no combinations
+
         JsonObject top = root.createNestedObject(FPSTR(_name));
 
         top[FPSTR(_enabled)] = enabled;
@@ -136,7 +140,7 @@ public:
      * getJsonValue(src, dest, default) also assigns a default when the key is absent.
      */
     bool readFromConfig(JsonObject &root) override {
-        // config was saved -> no. of switches may have changed
+        // usermod config was saved -> no. of switches may have changed
         // or we just booted and need to init these
         n_switches = num_switches();
         n_combinations = n_switches == 1 ? 0 : pow(2, n_switches); // 2^0 = 1, however 0 switches realistically means no combinations
