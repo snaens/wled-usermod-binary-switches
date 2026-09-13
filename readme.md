@@ -9,43 +9,36 @@ Example with 3 switches (either on (1) or off (0))
         1 0 0 → Preset 4
 ```
 
-## Getting started
+## Installation
 
-### 2. Wire it into your WLED build
-
-
-
-### 3. Share it
-
-Tag your working version and add your usermod to the [Community Usermods page](https://kno.wled.ge/advanced/community-usermods/) by sending a PR to [WLED-Docs](https://github.com/wled/WLED-Docs).  Other developers can add your usermod to their builds by adding your repository to their build's `custom_usermods`!
-
+Follow the docs: [advanced/custom-features/](https://kno.wled.ge/advanced/custom-features/)  
+to set up the compilation environment.
 ```ini
-custom_usermods =
+  ;;platformio_override.ini;;
+[env:my_build]
+extends = env:esp32dev
+custom_usermods = 
   ${env:esp32dev.custom_usermods}
-  https://github.com/you/wled-usermod-my_sensor.git#v1.0.0
+  https://github.com/snaens/wled-usermod-binary-switches.git
 ```
 
+> [!TIP]
+> don't forget to press reset if your board doesn't do it automatically
 
-## What's in this repo
+> [!TIP]
+> You can use [the wled installer](https://install.wled.me/) to configure wifi once the upload is finished.  
+> simply click `install`, select the serial port,  
+> then (given the installation was successful) click `connect to wifi` 
 
-**`library.json`** — PlatformIO library manifest. The `"libArchive": false` setting is required; without it the build will fail. Add any library dependencies here.
 
-**`usermod_example.cpp`** — A fully annotated example covering all available lifecycle hooks:
+## Usage
 
-| Method | When called |
-|---|---|
-| `setup()` | Once at boot, after config is loaded, before WiFi |
-| `connected()` | Each time WiFi (re)connects |
-| `loop()` | Every main loop iteration |
-| `addToJsonInfo()` | When `/json/info` is requested |
-| `addToJsonState()` / `readFromJsonState()` | On `/json/state` get/post |
-| `addToConfig()` / `readFromConfig()` | Persistent settings in `cfg.json` |
-| `appendConfigData()` | When the Usermod Settings page renders |
-| `handleOverlayDraw()` | Just before each LED strip update |
-| `handleButton()` | On button events |
-| `onMqttMessage()` / `onMqttConnect()` | MQTT events |
-| `onStateChange()` | When WLED state changes |
-
-`REGISTER_USERMOD(instance)` at the bottom of the file handles self-registration — there is no `usermods_list.cpp` to edit.
-
-For full documentation see the [WLED Custom Features](https://kno.wled.ge/advanced/custom-features/) page.
+1. set up some switches the usual way:  
+  ![wled leds settings page showing configured switches](./images/settings_switches.png)
+2. go to `usermods`.  
+  select the order of your switches (order to string them into binary):  
+  ![wled usermods settings page showing BinarySwitches switch order config](./images/settings_usermods.png)
+3. select the presets to load at for the binary states:  
+   (make sure to create some presets to use)  
+  ![wled usermods settings page showing BinarySwitches switch order config](./images/settings_usermods_2.png)
+4. hit save! Done!
