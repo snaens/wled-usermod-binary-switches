@@ -114,8 +114,9 @@ public:
 
         JsonObject switches = top.createNestedObject("switches");
         JsonArray activeSwitches = switches.createNestedArray(F("active switches"));
-        for (const auto sw: switch_map) {
-            activeSwitches.add(sw);
+        for (int i = 0; i < buttons.size(); ++i) {
+            if (buttons[i].type == BTN_TYPE_SWITCH || buttons[i].type == BTN_TYPE_TOUCH_SWITCH)
+                activeSwitches.add(i);
         }
 
         JsonObject presets = top.createNestedObject("presets");
