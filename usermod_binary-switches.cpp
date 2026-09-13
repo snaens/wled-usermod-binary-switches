@@ -14,7 +14,7 @@ private:
     // config variables — defaults set inside readFromConfig()
 
     std::vector<uint> preset_map;
-    std::map<uint, uint> switch_map; // button# -> index
+    std::vector<uint> switch_map; // button indexes, -1 for disabled // {0, -1 ,2}
 
     // string that are used multiple time (this will save some flash memory)
     static const char _name[];
@@ -144,7 +144,7 @@ public:
         n_switches = num_switches();
         n_combinations = n_switches == 1 ? 0 : pow(2, n_switches); // 2^0 = 1, however 0 switches realistically means no combinations
 
-        JsonObject top = root[FPSTR(_name)];
+        const JsonObject top = root[FPSTR(_name)];
         if (top.isNull()) {
             DEBUG_PRINT(FPSTR(_name));
             DEBUG_PRINTLN(F(": No config found. (Using defaults.)"));
@@ -164,22 +164,19 @@ public:
 
         DEBUG_PRINT(FPSTR(_name));
         DEBUG_PRINTF(PSTR(": loading config using %i switches\n"), n_switches);
-        for (int i = 0; i < n_switches; ++i) {
-            if (buttons[i].type == BTN_TYPE_SWITCH || buttons[i].type == BTN_TYPE_TOUCH_SWITCH) {
-                int button_id;
-                configComplete &= getJsonValue(top[F("active switches")][i], button_id, 0);
-                if (button_id >= 0) {
-                    // negative = disabled
-                    switch_map[i] = button_id;
-                    DEBUG_PRINT(FPSTR(_name));
-                    DEBUG_PRINTF(PSTR(": configured switch mapping %i -> %i\n"), i, switch_map[i]);
-                } else if (button_id == -1) {
-                    DEBUG_PRINT(FPSTR(_name));
-                    DEBUG_PRINTF(PSTR(": button %i is disabled\n"), i);
-                }
+        JsonArray config;
+        configComplete &= getJsonValue(top[F("switches")][F("active switches")], config);
+        for (int switchid: config) {
+            if (switchid >= 0) {
+                // negative = disabled
+                switch_map.push_back(switchid);
+                DEBUG_PRINT(FPSTR(_name));
+                DEBUG_PRINTF(PSTR(": configured switch mapping %i -> %i\n"), switchid, switch_map[switchid]);
+            } else if (switchid == -1) {
+                DEBUG_PRINT(FPSTR(_name));
+                DEBUG_PRINTF(PSTR(": button %i is disabled\n"), switchid);
             }
         }
-
 
         preset_map.clear();
         for (int i = 0; i < n_combinations; ++i)
@@ -188,7 +185,7 @@ public:
         DEBUG_PRINT(FPSTR(_name));
         DEBUG_PRINTF(PSTR(": loading config using %i combinations\n"), n_combinations);
         for (int i = 0; i < n_combinations; i++) {
-            configComplete &= getJsonValue(top[F("preset map")][i], preset_map.at(i), 0);
+            configComplete &= getJsonValue(top[F("presets")][F("preset map")][i], preset_map.at(i), 0);
             DEBUG_PRINT(FPSTR(_name));
             DEBUG_PRINTF(PSTR(": configured combination mapping %i -> %i\n"), i, preset_map.at(i));
         }
@@ -222,8 +219,8 @@ public:
                     ret += "addOption(dd,'Switch " +
                             std::to_string(i) + " (pin " + std::to_string(button.pin) +
                             ")'," + std::to_string(i) + ");";
-                    i++;
                 }
+                i++;
             }
             return ret;
         };
@@ -299,21 +296,17 @@ public:
                 //fire edge event only after 50ms without change (debounce)
                 DEBUG_PRINTF_P(PSTR("Switch: Activating  %u\n"), b);
 
-                if (switch_map.count(b) == 0) {
+                auto itr = find(switch_map.begin(), switch_map.end(), b);
+                if (itr == switch_map.end()) {
                     DEBUG_PRINT(FPSTR(_name));
                     DEBUG_PRINTF_P(PSTR("Button %u, pin %i is disabled! Ignoring toggle\n"), b, buttons[b].pin);
                 } else {
                     DEBUG_PRINT(FPSTR(_name));
                     DEBUG_PRINTF_P(PSTR("Button %u, pin %i -> state: %i\n"), b, buttons[b].pin, buttons[b].pressedBefore);
 
-                    binary_state ^= 1 << switch_map.at(b);
+                    binary_state ^= 1 << std::distance(switch_map.begin(), itr); //get index
                     DEBUG_PRINT(FPSTR(_name));
                     DEBUG_PRINTF_P(PSTR(": Switch pattern: %s\n"), printBits(n_switches, binary_state).c_str());
-
-                    for (auto preset: preset_map) {
-                        DEBUG_PRINT("preset map ");
-                        DEBUG_PRINTLN(preset);
-                    }
 
                     applyPreset(preset_map.at(binary_state), CALL_MODE_BUTTON_PRESET);
                 }
